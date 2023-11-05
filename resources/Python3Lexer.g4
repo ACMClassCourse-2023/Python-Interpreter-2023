@@ -10,110 +10,90 @@ tokens {
 }
 
 @lexer::members {
-    // A queue where extra tokens are pushed on (see the NEWLINE lexer rule).
- private: std::list<antlr4::Token*> tokens ;
-     // The stack that keeps track of the indentation level.
- private: std::stack<int> indents ;
-     // The amount of opened braces, brackets and parenthesis.
- private: int opened = 0;
-     // The most recently produced token.
- private: antlr4::Token* lastToken = nullptr;
+private:
+	// A queue where extra tokens are pushed on (see the NEWLINE lexer rule).
+	std::list<antlr4::Token *> tokens;
+private:
+	// The stack that keeps track of the indentation level.
+	std::stack<int> indents;
+private:
+	// The amount of opened braces, brackets and parenthesis.
+	int opened = 0;
+public:
+	void emit(std::unique_ptr<antlr4::Token> t) override {
+		tokens.push_back(t.get());
+		token.release();
+		token = std::move(t);
+	}
 
- public: void emit(std::unique_ptr<antlr4::Token> t) override {
-       token.release();
-       token=std::move(t);
+public:
+	std::unique_ptr<antlr4::Token> nextToken() override {
+		// Check if the end-of-file is ahead and there are still some DEDENTS expected.
+		if (_input->LA(1) == EOF && !this->indents.empty()) {
+			// Remove any trailing EOF tokens from our buffer.
+			for (auto i = tokens.rbegin(); i != tokens.rend();) {
+				auto tmp = i;
+				i++;
+				if ((*tmp)->getType() == EOF) {
+					tokens.erase(tmp.base());
+				}
+			}
 
-       tokens.push_back(token.get());
- //      std::cout<<t->toString()<<std::endl;
-     }
+			// First emit an extra line break that serves as the end of the statement.
+			emit(make_CommonToken(Python3Lexer::NEWLINE, "\n"));
 
+			// Now emit as much DEDENT tokens as needed.
+			while (!indents.empty()) {
+				auto tmp = createDedent();
+				this->emit(std::move(tmp));
+				indents.pop();
+			}
 
- public: std::unique_ptr<antlr4::Token> nextToken() override {
-       // Check if the end-of-file is ahead and there are still some DEDENTS expected.
-       if (_input->LA(1) == EOF && !this->indents.empty()) {
-         // Remove any trailing EOF tokens from our buffer.
-         for(auto i=tokens.rbegin();i!=tokens.rend();){
-             auto tmp=i;
-             i++;
-             if((*tmp)->getType()==EOF){
-                 tokens.erase(tmp.base());
-             }
-         }
+			// Put the EOF back on the token stream.
+			this->emit(make_CommonToken(static_cast<int>(Python3Lexer::EOF), "<EOF>"));
+		}
+		if (tokens.empty()) {
+			std::unique_ptr<antlr4::Token> next = Lexer::nextToken();
+			next.release();
+			// release it because it should be controlled by 'tokens' now
+		}
+		auto tmp = tokens.front();
+		tokens.pop_front();
+		return std::unique_ptr<antlr4::Token>(tmp);
+	}
 
+private:
+	std::unique_ptr<antlr4::Token> createDedent() {
+		auto dedent = make_CommonToken(Python3Lexer::DEDENT, "");
+		dedent->setText("DEDENT");
+		return std::move(dedent);
+	}
 
-         // First emit an extra line break that serves as the end of the statement.
-         std::unique_ptr<antlr4::Token> tmp=commonToken(Python3Lexer::NEWLINE, "\n");
-         this->emit(std::move(tmp));
+private:
+	std::unique_ptr<antlr4::CommonToken> make_CommonToken(int type, std::string const &text) {
+		size_t stop = this->getCharIndex() - 1;
+		size_t start = text.empty() ? stop : stop - text.length() + 1;
+		return std::make_unique<antlr4::CommonToken>(std::make_pair(this, _input), type, DEFAULT_TOKEN_CHANNEL, start, stop);
+	}
 
-         // Now emit as much DEDENT tokens as needed.
-         while (!indents.empty()) {
-             auto tmp=createDedent();
-           this->emit(std::move(tmp));
-           indents.pop();
-         }
-
-         // Put the EOF back on the token stream.
-         this->emit(commonToken(static_cast<int>(Python3Lexer::EOF), "<EOF>"));
-       }
-
-       std::unique_ptr<antlr4::Token> next = Lexer::nextToken();
-
-       if (next->getChannel() == antlr4::Token::DEFAULT_CHANNEL) {
-         // Keep track of the last token on the default channel.
-         this->lastToken = next.get();
-       }
-         if (tokens.empty()) {
-             return std::move(next);
-         } else{
-             next.release();
-             auto tmp=tokens.front();
-             tokens.pop_front();
-             return std::unique_ptr<antlr4::Token>(tmp);
-         }
-
-     }
-
- private: std::unique_ptr<antlr4::Token> createDedent() {
-       auto dedent = commonToken(Python3Lexer::DEDENT, "");
-       dedent->setLine(this->lastToken->getLine());
-       return std::move(dedent);
-     }
-
- private: std::unique_ptr<antlr4::CommonToken> commonToken(int type,std::string text) {
-       int stop = this->getCharIndex() - 1;
-       int start = text.empty() ? stop : stop - text.length() + 1;
-       return std::move(std::unique_ptr<antlr4::CommonToken>(new antlr4::CommonToken({ this, _input },
-               type,
-               DEFAULT_TOKEN_CHANNEL, start, stop)));
-     }
-
-     // Calculates the indentation of the provided spaces, taking the
-     // following rules into account:
-     //
-     // "Tabs are replaced (from left to right) by one to eight spaces
-     //  such that the total number of characters up to and including
-     //  the replacement is a multiple of eight [...]"
-     //
-     //  -- https://docs.python.org/3.1/reference/lexical_analysis.html#indentation
-     static int getIndentationCount(std::string spaces) {
-       int count = 0;
-       for (char ch : spaces) {
-         switch (ch) {
-           case '\t':
-             count += 8 - (count % 8);
-             break;
-           default:
-             // A normal space char.
-             count++;
-         }
-       }
-
-       return count;
-     }
-
-     bool atStartOfInput() {
-       return Lexer::getCharPositionInLine() == 0 && Lexer::getLine() == 1;
-     }
+	// Calculates the indentation of the provided spaces, taking the
+	// following rules into account:
+	//
+	// "Tabs are replaced (from left to right) by one to eight spaces
+	//  such that the total number of characters up to and including
+	//  the replacement is a multiple of eight [...]"
+	//
+	//  -- https://docs.python.org/3.1/reference/lexical_analysis.html#indentation
+	static int getIndentationCount(std::string const &spaces) {
+		int count = 0;
+		for (auto ch : spaces)
+			if (ch == '\t') count += 8 - (count % 8);
+			else ++count; // normal space char
+		return count;
+	}
+	bool atStartOfInput() {
+		return Lexer::getCharPositionInLine() == 0 && Lexer::getLine() == 1;
+	}
 }
 
 STRING: STRING_LITERAL | BYTES_LITERAL;
@@ -147,42 +127,39 @@ NEWLINE: (
 		{atStartOfInput()}? SPACES
 		| ( '\r'? '\n' | '\r' | '\f') SPACES?
 	) {
-	{
-     std::string pattern1="[^\r\n\f]+";
-     std::string pattern2="[\r\n\f]+";
-     std::regex re1(pattern1);
-     std::regex re2(pattern2);
-     std::string fmt="";
-     std::string newLine=regex_replace(getText(),re1,fmt);
-      std::string spaces = regex_replace(getText(),re2,fmt);
-      int next = _input->LA(1);
-      if (opened > 0 || next == '\r' || next == '\n' || next == '\f' || next == '#') {
-        // If we're inside a list or on a blank line, ignore all indents,
-        // dedents and line breaks.
-        skip();
-      }
-      else {
-        emit(commonToken(NEWLINE, newLine));
-        int indent = getIndentationCount(spaces);
-        int previous = indents.empty() ? 0 : indents.top();
-        if (indent == previous) {
-          // skip indents of the same size as the present indent-size
-          skip();
-        }
-        else if (indent > previous) {
-          indents.push(indent);
-          emit(commonToken(Python3Lexer::INDENT, spaces));
-        }
-        else {
-          // Possibly emit more than 1 DEDENT token.
-          while(!indents.empty() && indents.top() > indent) {
-            this->emit(createDedent());
-            indents.pop();
-          }
-        }
-      }
+{ // Braces are required inside the switch
+	std::regex re1(R"([^\r\n\f]+)");
+	std::regex re2(R"([\r\n\f]+)");
+	std::string newLine = regex_replace(getText(), re1, "");
+	std::string spaces = regex_replace(getText(), re2, "");
+	int next = _input->LA(1);
+	if (opened > 0 || next == '\r' || next == '\n' || next == '\f' || next == '#') {
+		// If we're inside a list or on a blank line, ignore all indents,
+		// dedents and line breaks.
+		skip();
 	}
-   };
+	else {
+		emit(make_CommonToken(NEWLINE, newLine));
+		int indent = getIndentationCount(spaces);
+		int previous = indents.empty() ? 0 : indents.top();
+		if (indent == previous) {
+			// skip indents of the same size as the present indent-size
+			// do nothing
+		}
+		else if (indent > previous) {
+			indents.push(indent);
+			emit(make_CommonToken(Python3Lexer::INDENT, spaces));
+		}
+		else {
+			// Possibly emit more than 1 DEDENT token.
+			while (!indents.empty() && indents.top() > indent) {
+				this->emit(createDedent());
+				indents.pop();
+			}
+		}
+	}
+}
+};
 
 /// identifier   ::=  id_start id_continue*
 NAME: ID_START ID_CONTINUE*;
