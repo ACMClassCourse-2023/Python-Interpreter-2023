@@ -156,10 +156,10 @@ ADD:'+';
     {
         auto ret1 = visit(ctx->NUMBER());
         auto ret2 = visit(ctx->NUMBER());
-        if (auto v1int = std::any_cast<int*>(ret1), v2int = std::any_cast<int*>(ret2);
+        if (auto v1int = std::any_cast<int>(&ret1), v2int = std::any_cast<int>(&ret2);
             v1int && v2int)
             return *v1int + *v2int;
-        else if (auto v1str = std::any_cast<string*>(ret1), v2str = std::any_cast<string*>(ret2);
+        else if (auto v1str = std::any_cast<string>(&ret1), v2str = std::any_cast<string>(&ret2);
             v1str && v2str)
             return *v1str + *v2str;
         else
