@@ -8,10 +8,10 @@ Python 解释器采用 Antlr 作为前端语法分析器，其中核心代码编
 
 为了在你自己的电脑上也使用 Antlr 运行环境，你需要将 Antlr 编译好的运行环境安装到你的电脑上。
 
-将 `antlr-runtime_4.13.1_amd64.deb` 文件下载到 WSL 中，打开文件所在目录，执行以下命令安装：
+将 `antlr4-runtime_4.13.1_amd64.deb` 文件下载到 WSL 中，打开文件所在目录，执行以下命令安装：
 
 ```shell
-sudo apt install ./antlr-runtime_4.13.1_amd64.deb
+sudo apt install ./antlr4-runtime_4.13.1_amd64.deb
 ```
 
 在这个包中，含有 Antlr 4.13.1 的动态链接库、静态链接库以及头文件，如果不装这个包，
